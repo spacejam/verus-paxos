@@ -47,8 +47,13 @@ Verus is the compiler wrapper (`verus src/lib.rs`). No runtime Cargo dependencie
 Ballot        = (round: u64, proposer_id: u64)   // lexicographic order
 Versioned<S>  = { version: u64, uuid: Uuid, state: S }
 NodeId        = u64
+ProposerId    = u64
+RoundId       = Ballot                            // each round identified by its ballot
 Quorum        = Set<NodeId>                       // ghost/spec only
 ```
+
+`cluster_size: u64` is a spec-level constant threaded as a parameter through all quorum
+and chosen predicates. It is fixed at cluster initialization and never changes.
 
 `S` is an opaque generic type parameter. The protocol never inspects `state`; all
 invariants are stated in terms of `version` and `uuid`. The `state` field is an opaque
@@ -171,6 +176,8 @@ Therefore `v1 == v2`.
 **`lemma_higher_ballot_sees_chosen_version`**
 If `chosen(states, b1, v1, q1)` and a proposer at ballot `b2 > b1` completed Phase 1
 with quorum `q2`, then `select_value(phase1_responses(states, b2, q2)).version >= v1.version`.
+(`phase1_responses(states, b, q)` collects the `Promise` reply from each acceptor in `q`
+given acceptor states `states` and ballot `b`; defined in `quorum.rs`.)
 
 *Proof*: `q1 ∩ q2` non-empty; the intersecting acceptor accepted `(b1, v1)` and promised
 `b2 >= b1`. `select_value` picks the highest accepted ballot, so it returns a version
@@ -207,10 +214,12 @@ ballot.
 `ChosenHistory<S>` is a ghost-only `Seq<Versioned<S>>` that grows as rounds complete.
 It exists only in `proof` mode; never in exec memory.
 
-A companion ghost map `WitnessedValues<S>: Map<ProposerId, Versioned<S>>` records the
-highest-versioned value each proposer observed in Phase 1 (committed or partially
-replicated). This supplies the existential witness for `INV_CAUSAL_CHAIN` without
-requiring intermediate versions to be committed.
+A companion ghost map `WitnessedValues<S>: Map<Ballot, Versioned<S>>` records the
+highest-versioned value observed in Phase 1 for each ballot (committed or partially
+replicated). Keyed by `Ballot` rather than `ProposerId` because a single proposer may
+run multiple rounds at different ballots, and each round has an independent Phase 1
+witness. This supplies the existential witness for `INV_CAUSAL_CHAIN` without requiring
+intermediate versions to be committed.
 
 ### Invariants
 
@@ -261,6 +270,11 @@ spec fn abstract_register<S>(history: ChosenHistory<S>) -> Versioned<S> {
 ### Linearizability statement
 
 ```
+// Operation<S>: { proposer: ProposerId, ballot: Ballot, kind: Read | Write(spec_fn(S)->S),
+//                 invoke_time: nat, response_time: nat, response: Versioned<S> }
+// operations_respect_real_time_order: forall i < j where op[i].response_time < op[j].invoke_time
+// is_valid_linearization: serialization assigns each op a linearization point (index into
+//   the causal chain) within [invoke_time, response_time] consistent with version order
 proof fn cas_paxos_is_linearizable<S>(
     history: ChosenHistory<S>,
     witnessed: WitnessedValues<S>,
@@ -293,8 +307,8 @@ If operation `op1` completes before `op2` begins, then `op1`'s committed version
 
 **`lemma_return_value_matches_history`**
 Every read that commits version `k` returns `history[k]`. Follows from
-`INV_READ_COMMITS_BEFORE_RETURNING`. Every write that commits version `k+1` returns
-`apply_cas(f, witnessed[proposer_id])` which is exactly `history[k+1]` by
+`INV_READ_COMMITS_BEFORE_RETURNING`. Every write at ballot `b` that commits version `k+1`
+returns `apply_cas(f, witnessed[b])` which is exactly `history[k+1]` by
 `INV_CAUSAL_CHAIN`.
 
 The linearization is constructed by assigning each write its version's position in the
