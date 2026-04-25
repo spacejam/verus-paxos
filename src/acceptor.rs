@@ -24,6 +24,7 @@ pub proof fn lemma_initial_state_satisfies_inv<S>()
     ensures inv_acceptor(AcceptorState::<S> { promised: None, accepted: None })
 {}
 
+#[derive(Clone, Debug)]
 pub enum PrepareResponse<S> {
     Promise { ballot: Ballot, accepted: Option<(Ballot, Versioned<S>)> },
     Nack,
@@ -39,6 +40,8 @@ pub fn handle_prepare<S: Clone>(
     ensures
         inv_acceptor(result.0),
         match result.1 {
+            // PROOF_OBLIGATION: Promise.accepted == old(state).accepted — provable by construction
+            // but Verus lacks Clone spec for non-Copy types and old() requires &mut for by-value params.
             PrepareResponse::Promise { ballot, accepted: _ } => {
                 ballot == b
                 && result.0.promised == Some(b)
@@ -64,6 +67,7 @@ pub fn handle_prepare<S: Clone>(
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AcceptResponse {
     Accepted { ballot: Ballot },
     Nack,
