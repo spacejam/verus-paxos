@@ -84,8 +84,10 @@ pub proof fn lemma_higher_ballot_sees_chosen_version<S>(
             match states[id].promised { Some(p) => ballot_le(b2, p), None => false },
         // Completeness: promises faithfully reflects q2 acceptors' accepted values.
         // Caller (cluster.rs) proves this from ghost tracking; was previously the axiom.
-        forall |id: NodeId| #[trigger] q2.contains(id) && states.contains_key(id) ==>
-            exists |i: int| 0 <= i < promises.len()
+        forall |id: NodeId|
+            #[trigger] q2.contains(id)
+            && states.contains_key(id)
+            ==> exists |i: int| 0 <= i < promises.len()
                 && promises[i].from == id
                 && promises[i].accepted == states[id].accepted,
     ensures
@@ -109,31 +111,12 @@ pub proof fn lemma_higher_ballot_sees_chosen_version<S>(
 // Since history versions are strictly increasing (inv_history_monotone), same version
 // implies same index implies same value.
 pub proof fn lemma_version_unique_across_ballots<S>(
-    states: Map<NodeId, AcceptorState<S>>,
     h: ChosenHistory<S>,
-    b1: Ballot,
-    b2: Ballot,
     v1: Versioned<S>,
     v2: Versioned<S>,
-    q1: Set<NodeId>,
-    q2: Set<NodeId>,
-    universe: Set<NodeId>,
-    cluster_size: u64,
 )
     requires
-        chosen(states, b1, v1, q1, cluster_size),
-        chosen(states, b2, v2, q2, cluster_size),
         v1.version == v2.version,
-        q1.subset_of(universe),
-        q2.subset_of(universe),
-        universe.finite(),
-        universe.len() == cluster_size as nat,
-        forall |id: NodeId| universe.contains(id) ==> states.contains_key(id),
-        forall |id: NodeId| #[trigger] states.contains_key(id) ==> inv_acceptor(states[id]),
-        forall |id: NodeId| #[trigger] q1.contains(id) ==>
-            match states[id].promised { Some(p) => ballot_le(b1, p), None => false },
-        forall |id: NodeId| #[trigger] q2.contains(id) ==>
-            match states[id].promised { Some(p) => ballot_le(b2, p), None => false },
         inv_history_monotone(h),
         exists |i: int| 0 <= i < h.len() && h[i] == v1,
         exists |i: int| 0 <= i < h.len() && h[i] == v2,
@@ -144,10 +127,11 @@ pub proof fn lemma_version_unique_across_ballots<S>(
     let i2 = choose |i: int| 0 <= i < h.len() && h[i] == v2;
     // h[i1].version == v1.version == v2.version == h[i2].version
     if i1 < i2 {
+        assert(0 <= i1 < i2 < h.len());
         assert(h[i1].version < h[i2].version); // inv_history_monotone
-        // contradiction: h[i1].version == v1.version == v2.version == h[i2].version
         assert(false);
     } else if i2 < i1 {
+        assert(0 <= i2 < i1 < h.len());
         assert(h[i2].version < h[i1].version); // inv_history_monotone
         assert(false);
     }
@@ -161,38 +145,19 @@ pub proof fn lemma_version_unique_across_ballots<S>(
 // Note: transient acceptor state may hold different UUIDs at the same version
 // during concurrent proposals — this lemma applies to chosen values ONLY.
 pub proof fn lemma_uuid_unique_among_chosen<S>(
-    states: Map<NodeId, AcceptorState<S>>,
     h: ChosenHistory<S>,
-    b1: Ballot,
-    b2: Ballot,
     v1: Versioned<S>,
     v2: Versioned<S>,
-    q1: Set<NodeId>,
-    q2: Set<NodeId>,
-    universe: Set<NodeId>,
-    cluster_size: u64,
 )
     requires
-        chosen(states, b1, v1, q1, cluster_size),
-        chosen(states, b2, v2, q2, cluster_size),
         v1.version == v2.version,
-        q1.subset_of(universe),
-        q2.subset_of(universe),
-        universe.finite(),
-        universe.len() == cluster_size as nat,
-        forall |id: NodeId| universe.contains(id) ==> states.contains_key(id),
-        forall |id: NodeId| #[trigger] states.contains_key(id) ==> inv_acceptor(states[id]),
-        forall |id: NodeId| #[trigger] q1.contains(id) ==>
-            match states[id].promised { Some(p) => ballot_le(b1, p), None => false },
-        forall |id: NodeId| #[trigger] q2.contains(id) ==>
-            match states[id].promised { Some(p) => ballot_le(b2, p), None => false },
         inv_history_monotone(h),
         exists |i: int| 0 <= i < h.len() && h[i] == v1,
         exists |i: int| 0 <= i < h.len() && h[i] == v2,
     ensures
         v1.uuid == v2.uuid
 {
-    lemma_version_unique_across_ballots(states, h, b1, b2, v1, v2, q1, q2, universe, cluster_size);
+    lemma_version_unique_across_ballots(h, v1, v2);
     assert(v1 == v2);
 }
 
