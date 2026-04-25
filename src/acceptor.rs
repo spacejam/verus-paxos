@@ -111,6 +111,7 @@ pub fn handle_accept<S: Clone>(
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Promise<S> {
     pub from: NodeId,
     pub ballot: Ballot,
@@ -142,6 +143,7 @@ pub proof fn lemma_select_value_version_is_max<S>(
     own_value: Versioned<S>,
 )
     ensures
+        select_value(responses, own_value).version >= own_value.version,
         forall |i: int| 0 <= i < responses.len() ==>
             match #[trigger] responses[i].accepted {
                 None => true,
