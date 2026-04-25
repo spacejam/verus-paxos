@@ -62,34 +62,22 @@ pub fn handle_prepare<S: Clone>(
                 // Explicitly match state.accepted to preserve inv_acceptor through the clone:
                 // Ballot is Copy, so ballot field is preserved exactly; only Versioned<S>.state
                 // goes through clone. inv_acceptor only checks the ballot, not the value.
-                let new_accepted: Option<(Ballot, Versioned<S>)> = match state.accepted {
-                    None => None,
-                    Some((ab, ref v)) => Some((ab, v.clone())),
-                };
-                proof {
-                    // Show new_accepted has same ballot structure as state.accepted
+                let new_accepted: Option<(Ballot, Versioned<S>)> =
                     match state.accepted {
-                        None => { assert(new_accepted.is_none()); },
+                        None => None,
+                        Some((ab, ref v)) => Some((ab, v.clone())),
+                    };
+                let new_state = AcceptorState { promised: Some(b), accepted: new_accepted };
+                assert(inv_acceptor(new_state)) by {
+                    match new_accepted {
+                        None => {},
                         Some((ab, _)) => {
-                            assert(new_accepted.is_some());
-                            assert(new_accepted.unwrap().0 == ab);
+                            // inv_acceptor(state) gives ballot_le(ab, p); outer guard gives ballot_lt(p, b)
                             assert(ballot_le(ab, p));
-                            // p < b, and ballot_le(ab, p), so ballot_le(ab, b)
-                            assert(ballot_le(ab, b)) by {
-                                if ab.round < p.round {
-                                    assert(ab.round < b.round || ab.round == b.round);
-                                    assert(ab.round <= p.round);
-                                    assert(ab.round < b.round || (ab.round == b.round && ab.proposer_id <= b.proposer_id));
-                                } else {
-                                    // ab.round == p.round (since ballot_le holds)
-                                    assert(ab.round == p.round);
-                                    assert(ab.proposer_id <= p.proposer_id);
-                                }
-                            }
+                            assert(p.round < b.round || (p.round == b.round && p.proposer_id < b.proposer_id));
                         }
                     }
-                }
-                let new_state = AcceptorState { promised: Some(b), accepted: new_accepted };
+                };
                 let response = PrepareResponse::Promise { ballot: b, accepted: state.accepted };
                 (new_state, response)
             } else {
