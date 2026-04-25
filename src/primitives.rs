@@ -42,6 +42,7 @@ proof fn lemma_ballot_lt_total(a: Ballot, b: Ballot)
 // In exec mode, the caller generates a u128 and passes it in.
 pub type Uuid = u128;
 
+#[derive(PartialEq, Eq, Clone)]
 pub struct Versioned<S> {
     pub version: u64,
     pub uuid: Uuid,
@@ -49,7 +50,7 @@ pub struct Versioned<S> {
 }
 
 // apply_cas is the only spec function that touches .state.
-// new_uuid is supplied by the proposer (ghost parameter in exec context).
+// new_uuid is supplied by the proposer at the exec layer and passed through as a spec argument.
 pub open spec fn apply_cas<S>(
     f: spec_fn(S) -> S,
     v: Versioned<S>,
@@ -64,7 +65,7 @@ pub open spec fn apply_cas<S>(
     }
 }
 
-proof fn lemma_apply_cas_increments_version<S>(
+pub proof fn lemma_apply_cas_increments_version<S>(
     f: spec_fn(S) -> S,
     v: Versioned<S>,
     new_uuid: Uuid,
