@@ -22,3 +22,7 @@ target
 
 # Git worktrees
 .worktrees/
+
+# Verus output artifacts
+*.rlib
+
