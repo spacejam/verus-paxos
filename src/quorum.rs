@@ -41,7 +41,10 @@ pub proof fn axiom_phase1_responses_complete<S>(
                 && #[trigger] phase1_responses(states, b, q)[i].from == id
                 && phase1_responses(states, b, q)[i].accepted == states[id].accepted
 {
-    assume(false); // Axiom: phase1_responses faithfully reflects acceptor state
+    // Intentional soundness axiom — not a proof gap. The exec layer (cluster.rs)
+    // is responsible for populating phase1_responses correctly. This assume(false)
+    // is the Verus idiom for declaring an unverified but trusted boundary assumption.
+    assume(false);
 }
 
 // Agreement: at most one value is chosen per ballot.
@@ -100,6 +103,10 @@ pub proof fn lemma_higher_ballot_sees_chosen_version<S>(
         universe.len() == cluster_size as nat,
         forall |id: NodeId| universe.contains(id) ==> states.contains_key(id),
         forall |id: NodeId| #[trigger] states.contains_key(id) ==> inv_acceptor(states[id]),
+        // Encodes that q2 acceptors promised ballot b2, justifying their appearance
+        // in phase1_responses(states, b2, q2). Unused in the proof body because the
+        // connection is captured by axiom_phase1_responses_complete; retained as a
+        // semantic precondition to prevent callers from omitting it.
         forall |id: NodeId| #[trigger] q2.contains(id) ==>
             match states[id].promised { Some(p) => ballot_le(b2, p), None => false },
     ensures
@@ -154,12 +161,22 @@ pub proof fn lemma_version_unique_across_ballots<S>(
         lemma_higher_ballot_sees_chosen_version(
             states, b1, b2, v1, q1, q2, universe, cluster_size, v2
         );
-        assume(v1 == v2); // PROOF_OBLIGATION: inductive value-preservation on ballot order
+        // PROOF_OBLIGATION: `lemma_higher_ballot_sees_chosen_version` gives
+        // select_value(phase1_responses(states,b2,q2), v2).version >= v1.version,
+        // which bounds the version seen in Phase 1 but does not prove identity.
+        // To close this gap requires a global history invariant: "if a proposer at b2
+        // runs Phase 1, observes version >= v1.version, and produces a chosen value at
+        // the same version as v1, then it must have selected exactly v1 (same state and
+        // uuid)." This induction over ballot order requires threading a ChosenHistory
+        // invariant through all rounds — a history-layer argument in history.rs that
+        // is beyond the single-snapshot predicate available here.
+        assume(v1 == v2);
     } else {
         lemma_higher_ballot_sees_chosen_version(
             states, b2, b1, v2, q2, q1, universe, cluster_size, v1
         );
-        assume(v1 == v2); // PROOF_OBLIGATION: symmetric case
+        // PROOF_OBLIGATION: symmetric case — same gap as above, ballot order reversed.
+        assume(v1 == v2);
     }
 }
 

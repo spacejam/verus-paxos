@@ -33,7 +33,7 @@ proof fn lemma_ballot_lt_trans(a: Ballot, b: Ballot, c: Ballot)
     ensures ballot_lt(a, c)
 {}
 
-proof fn lemma_ballot_lt_total(a: Ballot, b: Ballot)
+pub proof fn lemma_ballot_lt_total(a: Ballot, b: Ballot)
     requires a != b
     ensures ballot_lt(a, b) || ballot_lt(b, a)
 {}
