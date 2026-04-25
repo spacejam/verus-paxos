@@ -3,6 +3,7 @@ use crate::primitives::*;
 
 verus! {
 
+#[derive(PartialEq, Eq, Clone)]
 pub struct AcceptorState<S> {
     pub promised: Option<Ballot>,
     pub accepted: Option<(Ballot, Versioned<S>)>,
