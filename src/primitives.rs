@@ -5,7 +5,7 @@ verus! {
 pub type NodeId = u64;
 pub type ProposerId = u64;
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct Ballot {
     pub round: u64,
     pub proposer_id: ProposerId,
@@ -42,7 +42,7 @@ proof fn lemma_ballot_lt_total(a: Ballot, b: Ballot)
 // In exec mode, the caller generates a u128 and passes it in.
 pub type Uuid = u128;
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Versioned<S> {
     pub version: u64,
     pub uuid: Uuid,
