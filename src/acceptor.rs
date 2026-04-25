@@ -111,6 +111,93 @@ pub fn handle_accept<S: Clone>(
     }
 }
 
+pub struct Promise<S> {
+    pub from: NodeId,
+    pub ballot: Ballot,
+    pub accepted: Option<(Ballot, Versioned<S>)>,
+}
+
+// select_value picks the Versioned<S> with the highest accepted version
+// from Phase 1 responses, falling back to own_value if none had accepted.
+pub open spec fn select_value<S>(
+    responses: Seq<Promise<S>>,
+    own_value: Versioned<S>,
+) -> Versioned<S>
+    decreases responses.len()
+{
+    if responses.len() == 0 {
+        own_value
+    } else {
+        let rest = select_value(responses.drop_last(), own_value);
+        let last = responses.last();
+        match last.accepted {
+            None => rest,
+            Some((_b, v)) => if v.version > rest.version { v } else { rest }
+        }
+    }
+}
+
+pub proof fn lemma_select_value_version_is_max<S>(
+    responses: Seq<Promise<S>>,
+    own_value: Versioned<S>,
+)
+    ensures
+        forall |i: int| 0 <= i < responses.len() ==>
+            match #[trigger] responses[i].accepted {
+                None => true,
+                Some((_b, v)) => select_value(responses, own_value).version >= v.version,
+            }
+    decreases responses.len()
+{
+    if responses.len() == 0 {
+        // vacuously true
+    } else {
+        let prefix = responses.drop_last();
+        lemma_select_value_version_is_max(prefix, own_value);
+        let prefix_result = select_value(prefix, own_value);
+        let last = responses.last();
+        // select_value(responses, ...) is defined in terms of prefix_result and last.accepted
+        match last.accepted {
+            None => {
+                // select_value(responses, own_value) == prefix_result
+                assert(select_value(responses, own_value) == prefix_result);
+                // for all i in prefix, IH gives: prefix_result.version >= v.version
+                // so select_value(responses, own_value).version >= v.version for those i too
+                assert forall |i: int| 0 <= i < responses.len() implies
+                    match #[trigger] responses[i].accepted {
+                        None => true,
+                        Some((_b, v)) => select_value(responses, own_value).version >= v.version,
+                    }
+                by {
+                    if i < prefix.len() {
+                        // IH covers i in prefix
+                        assert(responses[i] == prefix[i]);
+                    }
+                    // i == responses.len() - 1 is last, with None accepted, trivially true
+                }
+            },
+            Some((_blast, vlast)) => {
+                // select_value(responses, own_value) is either vlast or prefix_result
+                assert(select_value(responses, own_value) ==
+                    if vlast.version > prefix_result.version { vlast } else { prefix_result });
+                assert forall |i: int| 0 <= i < responses.len() implies
+                    match #[trigger] responses[i].accepted {
+                        None => true,
+                        Some((_b, v)) => select_value(responses, own_value).version >= v.version,
+                    }
+                by {
+                    if i < prefix.len() {
+                        // IH gives prefix_result.version >= v.version for prefix elements
+                        assert(responses[i] == prefix[i]);
+                        // select_value(responses, own_value).version >= prefix_result.version
+                    }
+                    // i == last index: select_value >= vlast.version by construction
+                }
+            }
+        }
+    }
+}
+
 } // verus!
 
 #[cfg(test)]
