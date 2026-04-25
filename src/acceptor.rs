@@ -40,26 +40,58 @@ pub fn handle_prepare<S: Clone>(
     ensures
         inv_acceptor(result.0),
         match result.1 {
-            // PROOF_OBLIGATION: Promise.accepted == old(state).accepted — provable by construction
-            // but Verus lacks Clone spec for non-Copy types and old() requires &mut for by-value params.
-            PrepareResponse::Promise { ballot, accepted: _ } => {
+            PrepareResponse::Promise { ballot, accepted } => {
                 ballot == b
                 && result.0.promised == Some(b)
+                && accepted == state.accepted
             },
             PrepareResponse::Nack => result.0 == state,
         }
 {
     match state.promised {
         None => {
-            let accepted = state.accepted.clone();
-            let new_state = AcceptorState { promised: Some(b), accepted: state.accepted };
-            (new_state, PrepareResponse::Promise { ballot: b, accepted })
+            // inv_acceptor(state) + promised==None implies accepted==None
+            assert(state.accepted.is_none());
+            // Build new_state without clone: accepted must be None here
+            let new_state = AcceptorState::<S> { promised: Some(b), accepted: None };
+            let response = PrepareResponse::Promise { ballot: b, accepted: state.accepted };
+            (new_state, response)
         }
         Some(p) => {
             if p.round < b.round || (p.round == b.round && p.proposer_id < b.proposer_id) {
-                let accepted = state.accepted.clone();
-                let new_state = AcceptorState { promised: Some(b), accepted: state.accepted };
-                (new_state, PrepareResponse::Promise { ballot: b, accepted })
+                // Explicitly match state.accepted to preserve inv_acceptor through the clone:
+                // Ballot is Copy, so ballot field is preserved exactly; only Versioned<S>.state
+                // goes through clone. inv_acceptor only checks the ballot, not the value.
+                let new_accepted: Option<(Ballot, Versioned<S>)> = match state.accepted {
+                    None => None,
+                    Some((ab, ref v)) => Some((ab, v.clone())),
+                };
+                proof {
+                    // Show new_accepted has same ballot structure as state.accepted
+                    match state.accepted {
+                        None => { assert(new_accepted.is_none()); },
+                        Some((ab, _)) => {
+                            assert(new_accepted.is_some());
+                            assert(new_accepted.unwrap().0 == ab);
+                            assert(ballot_le(ab, p));
+                            // p < b, and ballot_le(ab, p), so ballot_le(ab, b)
+                            assert(ballot_le(ab, b)) by {
+                                if ab.round < p.round {
+                                    assert(ab.round < b.round || ab.round == b.round);
+                                    assert(ab.round <= p.round);
+                                    assert(ab.round < b.round || (ab.round == b.round && ab.proposer_id <= b.proposer_id));
+                                } else {
+                                    // ab.round == p.round (since ballot_le holds)
+                                    assert(ab.round == p.round);
+                                    assert(ab.proposer_id <= p.proposer_id);
+                                }
+                            }
+                        }
+                    }
+                }
+                let new_state = AcceptorState { promised: Some(b), accepted: new_accepted };
+                let response = PrepareResponse::Promise { ballot: b, accepted: state.accepted };
+                (new_state, response)
             } else {
                 (state, PrepareResponse::Nack)
             }
