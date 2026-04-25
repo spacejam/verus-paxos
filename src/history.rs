@@ -33,6 +33,58 @@ pub open spec fn inv_causal_chain<S>(h: ChosenHistory<S>, witnessed: WitnessedVa
             && (#[trigger] h[i]) == apply_cas(f, witnessed[b], new_uuid)
 }
 
+/// Ghost map from history index to logical-clock step at which that value was committed.
+pub type CommitTimestamps = Map<nat, nat>;
+
+/// Every quorum-chosen value appears in ChosenHistory.
+/// Bridge invariant connecting the snapshot `chosen` predicate to ChosenHistory.
+pub open spec fn inv_chosen_in_history<S>(
+    h: ChosenHistory<S>,
+    states: Map<NodeId, AcceptorState<S>>,
+    cluster_size: u64,
+    universe: Set<NodeId>,
+) -> bool {
+    forall |b: Ballot, v: Versioned<S>, q: Set<NodeId>|
+        #[trigger] chosen(states, b, v, q, cluster_size) && q.subset_of(universe)
+        ==> exists |i: int| 0 <= i < h.len() && h[i] == v
+}
+
+pub proof fn lemma_chosen_in_history_maintained<S>(
+    h: ChosenHistory<S>,
+    v: Versioned<S>,
+    states_old: Map<NodeId, AcceptorState<S>>,
+    states_new: Map<NodeId, AcceptorState<S>>,
+    b: Ballot,
+    q: Set<NodeId>,
+    cluster_size: u64,
+    universe: Set<NodeId>,
+)
+    requires
+        inv_chosen_in_history(h, states_old, cluster_size, universe),
+        inv_history_monotone(h),
+        chosen(states_new, b, v, q, cluster_size),
+        q.subset_of(universe),
+        h.len() > 0 ==> h.last().version < v.version,
+        // Any value chosen in states_new other than v was also chosen in states_old.
+        forall |b2: Ballot, v2: Versioned<S>, q2: Set<NodeId>|
+            chosen(states_new, b2, v2, q2, cluster_size) && q2.subset_of(universe) && v2 != v
+            ==> chosen(states_old, b2, v2, q2, cluster_size),
+    ensures
+        inv_chosen_in_history(h.push(v), states_new, cluster_size, universe)
+{
+    assert forall |b2: Ballot, v2: Versioned<S>, q2: Set<NodeId>|
+        #[trigger] chosen(states_new, b2, v2, q2, cluster_size) && q2.subset_of(universe)
+        implies exists |i: int| 0 <= i < h.push(v).len() && h.push(v)[i] == v2
+    by {
+        if v2 == v {
+            assert(h.push(v)[h.len() as int] == v);
+        } else {
+            let idx = choose |i: int| 0 <= i < h.len() && h[i] == v2;
+            assert(h.push(v)[idx] == h[idx]);
+        }
+    }
+}
+
 pub proof fn lemma_history_append_preserves_monotone<S>(
     h: ChosenHistory<S>,
     v: Versioned<S>,
