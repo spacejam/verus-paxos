@@ -38,4 +38,39 @@ proof fn lemma_ballot_lt_total(a: Ballot, b: Ballot)
     ensures ballot_lt(a, b) || ballot_lt(b, a)
 {}
 
+// Uuid is u128 in spec mode (no rand dependency needed for proofs).
+// In exec mode, the caller generates a u128 and passes it in.
+pub type Uuid = u128;
+
+pub struct Versioned<S> {
+    pub version: u64,
+    pub uuid: Uuid,
+    pub state: S,
+}
+
+// apply_cas is the only spec function that touches .state.
+// new_uuid is supplied by the proposer (ghost parameter in exec context).
+pub open spec fn apply_cas<S>(
+    f: spec_fn(S) -> S,
+    v: Versioned<S>,
+    new_uuid: Uuid,
+) -> Versioned<S>
+    recommends v.version < u64::MAX
+{
+    Versioned {
+        version: (v.version + 1) as u64,
+        uuid: new_uuid,
+        state: f(v.state),
+    }
+}
+
+proof fn lemma_apply_cas_increments_version<S>(
+    f: spec_fn(S) -> S,
+    v: Versioned<S>,
+    new_uuid: Uuid,
+)
+    requires v.version < u64::MAX
+    ensures apply_cas(f, v, new_uuid).version == v.version + 1
+{}
+
 } // verus!
