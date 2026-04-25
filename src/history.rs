@@ -88,6 +88,34 @@ pub proof fn lemma_chosen_in_history_maintained<S>(
     }
 }
 
+// Under inv_history_monotone, each value appears at most once in history,
+// so any two witnesses for h[i] == v must be the same index.
+pub proof fn lemma_history_index_unique<S>(
+    h: ChosenHistory<S>,
+    v: Versioned<S>,
+    i: int,
+    j: int,
+)
+    requires
+        inv_history_monotone(h),
+        0 <= i < h.len(),
+        0 <= j < h.len(),
+        h[i] == v,
+        h[j] == v,
+    ensures
+        i == j
+{
+    if i < j {
+        assert(h[i].version < h[j].version); // inv_history_monotone
+        assert(h[i].version == h[j].version); // both == v.version
+        assert(false);
+    } else if j < i {
+        assert(h[j].version < h[i].version); // inv_history_monotone
+        assert(h[j].version == h[i].version); // both == v.version
+        assert(false);
+    }
+}
+
 pub proof fn lemma_history_append_preserves_monotone<S>(
     h: ChosenHistory<S>,
     v: Versioned<S>,

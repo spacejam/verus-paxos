@@ -123,7 +123,10 @@ pub proof fn cas_paxos_is_linearizable<S>(
         forall |i: int| 0 <= i < ops.len() ==>
             exists |j: int| 0 <= j < h.len() && h[j] == (#[trigger] ops[i]).response,
         // Timestamps cover all history entries, and each commit step falls within
-        // the operation's real-time window (proved by cluster.rs postcondition)
+        // the operation's real-time window (proved by cluster.rs postcondition).
+        // NOTE for cluster.rs callers: lemma_history_index_unique guarantees the
+        // `choose` here picks the unique index — inv_history_monotone ensures no
+        // two history entries share the same Versioned<S> value.
         forall |i: int| 0 <= i < ops.len() ==> {
             let idx = choose |j: nat| (j as int) < h.len() && h[j as int] == (#[trigger] ops[i]).response;
             timestamps.contains_key(idx)
