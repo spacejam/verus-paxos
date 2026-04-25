@@ -33,7 +33,10 @@ pub open spec fn inv_causal_chain<S>(h: ChosenHistory<S>, witnessed: WitnessedVa
             && (#[trigger] h[i]) == apply_cas(f, witnessed[b], new_uuid)
 }
 
-/// Ghost map from history index to logical-clock step at which that value was committed.
+// CommitTimestamps: ghost map from history index to the logical-clock step at which
+// that value was committed (Phase 2 quorum reached). Defined here alongside the other
+// ghost history types; used in linearizability.rs (is_valid_linearization) and
+// cluster.rs (run_proposal postcondition).
 pub type CommitTimestamps = Map<nat, nat>;
 
 /// Every quorum-chosen value appears in ChosenHistory.
@@ -45,7 +48,7 @@ pub open spec fn inv_chosen_in_history<S>(
     universe: Set<NodeId>,
 ) -> bool {
     forall |b: Ballot, v: Versioned<S>, q: Set<NodeId>|
-        #[trigger] chosen(states, b, v, q, cluster_size) && q.subset_of(universe)
+        (#[trigger] chosen(states, b, v, q, cluster_size)) && q.subset_of(universe)
         ==> exists |i: int| 0 <= i < h.len() && h[i] == v
 }
 
