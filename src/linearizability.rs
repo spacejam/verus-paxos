@@ -55,10 +55,8 @@ pub open spec fn is_valid_linearization<S>(
         && ops[i].invoke_time <= idx as nat
         && idx as nat <= ops[i].response_time
     }
-    && forall |i: int, j: int|
-        #[trigger] ops[i].response.version + #[trigger] ops[j].response.version == ops[i].response.version + ops[j].response.version
-        && 0 <= i < j < ops.len() ==>
-        ops[i].response.version <= ops[j].response.version ||
+    && forall |i: int, j: int| 0 <= i < j < ops.len() ==>
+        (#[trigger] ops[i].response).version <= (#[trigger] ops[j].response).version ||
         serialization[j] < serialization[i]
 }
 
@@ -76,14 +74,14 @@ pub proof fn lemma_version_order_respects_real_time<S>(
         forall |i: int| 0 <= i < ops.len() && #[trigger] ops[i].is_read ==>
             exists |j: int| 0 <= j < h.len() && h[j] == ops[i].response,
     ensures
-        forall |i: int, j: int|
-            #[trigger] ops[i].response_time + #[trigger] ops[j].invoke_time == ops[i].response_time + ops[j].invoke_time
-            && 0 <= i < j < ops.len()
-            && ops[i].response_time < ops[j].invoke_time ==>
+        forall |i: int, j: int| 0 <= i < j < ops.len()
+            && (#[trigger] ops[i].response_time) < (#[trigger] ops[j].invoke_time) ==>
             ops[i].response.version < ops[j].response.version
 {}
 
 // Lemma: every operation's response appears somewhere in the history.
+// Reads: INV_READ_COMMITS_BEFORE_RETURNING guarantees this.
+// Writes: each write's response is the chosen value it drove to quorum, which is in history.
 pub proof fn lemma_return_value_matches_history<S>(
     h: ChosenHistory<S>,
     witnessed: WitnessedValues<S>,
@@ -92,11 +90,17 @@ pub proof fn lemma_return_value_matches_history<S>(
     requires
         inv_history_monotone(h),
         inv_causal_chain(h, witnessed),
-        forall |i: int| #[trigger] ops[i].invoke_time >= 0 && 0 <= i < ops.len() ==>
+        // Reads commit before returning (INV_READ_COMMITS_BEFORE_RETURNING)
+        forall |i: int| 0 <= i < ops.len() && #[trigger] ops[i].is_read ==>
+            exists |j: int| 0 <= j < h.len() && h[j] == ops[i].response,
+        // Writes produce values in the committed history
+        forall |i: int| 0 <= i < ops.len() && !(#[trigger] ops[i].is_read) ==>
             exists |j: int| 0 <= j < h.len() && h[j] == ops[i].response,
     ensures
-        forall |i: int| #[trigger] ops[i].invoke_time >= 0 && 0 <= i < ops.len() ==>
-            exists |j: int| 0 <= j < h.len() && h[j] == ops[i].response
+        forall |i: int| #[trigger] ops[i].is_read && 0 <= i < ops.len() ==>
+            exists |j: int| 0 <= j < h.len() && h[j] == ops[i].response,
+        forall |i: int| !(#[trigger] ops[i].is_read) && 0 <= i < ops.len() ==>
+            exists |j: int| 0 <= j < h.len() && h[j] == ops[i].response,
 {
 }
 
@@ -121,10 +125,16 @@ pub proof fn cas_paxos_is_linearizable<S>(
         ops.len() as nat,
         |i: int| choose |j: nat| (j as int) < h.len() && h[j as int] == ops[i].response
     );
-    // PROOF_OBLIGATION: full linearization proof requires time-index correspondence
-    // (mapping each operation's real-time interval to a specific history index).
-    // The core agreement properties are proven in Layers 1-4; this capstone is a
-    // specification-level statement that witness construction is correct.
+    // PROOF_OBLIGATION: Three properties remain unproven for is_valid_linearization:
+    // 1. Time-index correspondence: for each op, the chosen history index falls within
+    //    [op.invoke_time, op.response_time]. Requires threading wall-clock timestamps
+    //    through the exec layer into the ghost history — beyond the current model.
+    // 2. Version-serialization consistency: serialization order is consistent with version
+    //    order. Requires inv_history_monotone to propagate through the choose on indices.
+    // 3. Write linearization points: writes are linearized at their chosen-value index in
+    //    ChosenHistory, which conflates WitnessedValues and ChosenHistory for writes.
+    // Layers 1-4 prove the core agreement and causal-chain properties. The capstone
+    // admits these three gaps explicitly rather than concealing them as assume(false).
     assume(is_valid_linearization(h, witnessed, ops, serialization));
 }
 

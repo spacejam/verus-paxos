@@ -29,8 +29,8 @@ pub open spec fn inv_causal_chain<S>(h: ChosenHistory<S>, witnessed: WitnessedVa
     forall |i: int| 0 < i < h.len() ==>
         exists |b: Ballot, f: spec_fn(S) -> S, new_uuid: Uuid|
             witnessed.contains_key(b)
-            && witnessed[b].version == #[trigger] h[i].version - 1
-            && h[i] == apply_cas(f, witnessed[b], new_uuid)
+            && witnessed[b].version == h[i].version - 1
+            && (#[trigger] h[i]) == apply_cas(f, witnessed[b], new_uuid)
 }
 
 pub proof fn lemma_history_append_preserves_monotone<S>(
@@ -91,8 +91,8 @@ pub proof fn lemma_history_append_preserves_causal_chain<S>(
     assert forall |i: int| 0 < i < h.push(v).len() implies
         exists |rb: Ballot, rf: spec_fn(S) -> S, ru: Uuid|
             witnessed.contains_key(rb)
-            && witnessed[rb].version == #[trigger] h.push(v)[i].version - 1
-            && h.push(v)[i] == apply_cas(rf, witnessed[rb], ru)
+            && witnessed[rb].version == h.push(v)[i].version - 1
+            && (#[trigger] h.push(v)[i]) == apply_cas(rf, witnessed[rb], ru)
     by {
         if i < h.len() {
             assert(h.push(v)[i] == h[i]);
