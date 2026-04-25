@@ -82,7 +82,7 @@ pub open spec fn is_quorum(q: Set<NodeId>, cluster_size: u64) -> bool {
 // RoundId is the ballot that uniquely identifies a round.
 pub type RoundId = Ballot;
 
-proof fn lemma_quorums_intersect(
+pub proof fn lemma_quorums_intersect(
     q1: Set<NodeId>,
     q2: Set<NodeId>,
     universe: Set<NodeId>,
