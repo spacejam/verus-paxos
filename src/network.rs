@@ -1,7 +1,13 @@
 // exec
+#[allow(unused_imports)]
+use vstd::prelude::*;
 use std::collections::HashSet;
+#[allow(unused_imports)]
+use crate::primitives::{Ballot, Versioned};
 
-pub type NodeId = u64;
+pub use crate::primitives::NodeId;
+
+verus! {
 
 #[derive(Clone, Debug)]
 pub struct Message<S: Clone> {
@@ -12,11 +18,11 @@ pub struct Message<S: Clone> {
 
 #[derive(Clone, Debug)]
 pub enum Payload<S: Clone> {
-    Prepare { ballot: (u64, u64) },
-    Promise { ballot: (u64, u64), accepted: Option<((u64, u64), (u64, u128, S))> },
-    Accept  { ballot: (u64, u64), value: (u64, u128, S) },
-    Accepted { ballot: (u64, u64) },
-    Nack    { ballot: (u64, u64) },
+    Prepare { ballot: Ballot },
+    Promise { ballot: Ballot, accepted: Option<(Ballot, Versioned<S>)> },
+    Accept  { ballot: Ballot, value: Versioned<S> },
+    Accepted { ballot: Ballot },
+    Nack    { ballot: Ballot },
 }
 
 pub struct SimNetwork<S: Clone> {
@@ -27,10 +33,12 @@ pub struct SimNetwork<S: Clone> {
 }
 
 impl<S: Clone> SimNetwork<S> {
+    #[verifier::external_body]
     pub fn new(drop_rate: f64, failed_nodes: HashSet<NodeId>, seed: u64) -> Self {
         SimNetwork { queue: Vec::new(), drop_rate, failed_nodes, rng_seed: seed }
     }
 
+    #[verifier::external_body]
     pub fn send(&mut self, msg: Message<S>) {
         if self.failed_nodes.contains(&msg.to) || self.failed_nodes.contains(&msg.from) {
             return;
@@ -41,11 +49,18 @@ impl<S: Clone> SimNetwork<S> {
         self.queue.push(msg);
     }
 
+    #[verifier::external_body]
+    pub fn is_failed(&self, id: NodeId) -> bool {
+        self.failed_nodes.contains(&id)
+    }
+
+    #[verifier::external_body]
     pub fn deliver_one(&mut self) -> Option<Message<S>> {
         if self.queue.is_empty() { return None; }
         Some(self.queue.remove(0))
     }
 
+    #[verifier::external_body]
     fn should_drop(&mut self) -> bool {
         self.rng_seed = self.rng_seed
             .wrapping_mul(6364136223846793005)
@@ -54,3 +69,5 @@ impl<S: Clone> SimNetwork<S> {
         r < self.drop_rate
     }
 }
+
+} // verus!
