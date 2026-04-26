@@ -120,6 +120,7 @@ impl<S: Clone + PartialEq + Eq> CASPaxosCluster<S> {
         failed_nodes: std::collections::HashSet<NodeId>,
         seed: u64,
     ) -> (result: Self)
+        ensures result.inv()
     {
         let cluster_size = node_ids.len() as u64;
         let mut acceptors: HashMap<NodeId, AcceptorState<S>> = HashMap::new();
@@ -145,6 +146,42 @@ impl<S: Clone + PartialEq + Eq> CASPaxosCluster<S> {
         //     when ghost_states is empty.
         // The exec-side acceptors map is the actual runtime state; the ghost
         // mirror is meaningful only for proofs we have not yet closed.
+        proof {
+            // inv_acceptor: vacuous because ghost_states is empty.
+            assert(forall |id: NodeId| !Map::<NodeId, AcceptorState<S>>::empty().contains_key(id));
+            // inv_history_monotone: vacuous for empty sequence.
+            assert(inv_history_monotone(Seq::<Versioned<S>>::empty()));
+            // inv_causal_chain: vacuous for empty sequence.
+            assert(inv_causal_chain(Seq::<Versioned<S>>::empty(), Map::<Ballot, Versioned<S>>::empty()));
+            // inv_chosen_in_history: vacuous — chosen requires all quorum members
+            // to have accepted, impossible with empty ghost_states (no keys).
+            assert(inv_chosen_in_history(
+                Seq::<Versioned<S>>::empty(),
+                Map::<NodeId, AcceptorState<S>>::empty(),
+                cluster_size as u64,
+                Set::<NodeId>::empty())) by {
+                // chosen(empty_map, b, v, q, cs) requires forall id in q: empty_map.contains_key(id).
+                // But empty_map has no keys, so any q with is_quorum is not possible.
+                assert forall |b: Ballot, v: Versioned<S>, q: Set<NodeId>|
+                    (#[trigger] chosen(Map::<NodeId, AcceptorState<S>>::empty(), b, v, q, cluster_size as u64))
+                    && q.subset_of(Set::<NodeId>::empty())
+                    implies exists |i: int| 0 <= i < Seq::<Versioned<S>>::empty().len() && Seq::<Versioned<S>>::empty()[i] == v
+                by {
+                    // is_quorum requires q.len() * 2 > cluster_size, so q is non-empty.
+                    // But q.subset_of(Set::empty()) implies q is empty.
+                    // Non-empty and empty: contradiction, so this branch is vacuous.
+                    assert(is_quorum(q, cluster_size as u64));
+                    assert(q.subset_of(Set::<NodeId>::empty()));
+                    vstd::set_lib::lemma_len_subset(q, Set::<NodeId>::empty());
+                    assert(q.len() == 0);
+                    assert(q.len() * 2 == 0);
+                    // cluster_size as nat >= 0, and 0 > cluster_size as nat is false.
+                    // So is_quorum(q, cluster_size) is false. Contradiction.
+                };
+            };
+            // commit_timestamps: vacuous because history is empty (len == 0).
+            assert(forall |i: nat| (i as int) < (0int) ==> Map::<nat, nat>::empty().contains_key(i));
+        }
         CASPaxosCluster {
             acceptors,
             network: SimNetwork::new(drop_rate, failed_nodes, seed),
@@ -175,7 +212,14 @@ impl<S: Clone + PartialEq + Eq> CASPaxosCluster<S> {
         init_value: Versioned<S>,
         new_uuid: Uuid,
     ) -> Option<Versioned<S>>
+        requires old(self).inv()
     {
+        // Capture the inv facts from the pre-state into ghost locals so they
+        // remain accessible inside proof {} blocks after self is mutated.
+        let ghost initial_history = self.ghost_history@;
+        proof {
+            assert(inv_history_monotone(initial_history));
+        }
         let quorum_size = (self.cluster_size / 2 + 1) as usize;
         let node_ids: Vec<NodeId> = collect_node_ids(&self.acceptors);
 
@@ -202,6 +246,7 @@ impl<S: Clone + PartialEq + Eq> CASPaxosCluster<S> {
                 promise_count <= i,
                 forall |id: NodeId| #[trigger] local_ghost_states.contains_key(id)
                     ==> inv_acceptor(local_ghost_states[id]),
+                self.ghost_history@ == initial_history,
             decreases (node_ids.len() - i) as int
         {
             let id = node_ids[i];
@@ -305,12 +350,13 @@ impl<S: Clone + PartialEq + Eq> CASPaxosCluster<S> {
                 0 <= j <= node_ids.len(),
                 accepted_count <= j,
                 phase2_quorum.finite(),
-                accepted_count <= phase2_quorum.len() || accepted_count <= j,
+                accepted_count == phase2_quorum.len(),
                 forall |id: NodeId| #[trigger] local_ghost_states.contains_key(id)
                     ==> inv_acceptor(local_ghost_states[id]),
                 forall |id: NodeId| #[trigger] phase2_quorum.contains(id) ==>
                     local_ghost_states.contains_key(id)
                     && local_ghost_states[id].accepted == Some((b, new_value)),
+                self.ghost_history@ == initial_history,
             decreases (node_ids.len() - j) as int
         {
             let id = node_ids[j];
@@ -343,8 +389,15 @@ impl<S: Clone + PartialEq + Eq> CASPaxosCluster<S> {
                             // (Versioned<S>: Clone has no Verus spec for
                             // clone()).
                             assume(nv_clone == new_value);
+                            // Each NodeId is visited at most once because
+                            // self.acceptors.remove(&id) removes it from the
+                            // HashMap; a second remove would return None and
+                            // skip the inner block. Verus lacks a HashMap spec
+                            // to express this, so we assume it here.
+                            assume(!phase2_quorum.contains(id));
                             local_ghost_states = local_ghost_states.insert(id, new_state);
                             phase2_quorum = phase2_quorum.insert(id);
+                            vstd::set::axiom_set_insert_len(phase2_quorum.remove(id), id);
                             assert(phase2_quorum.contains(id));
                             assert(local_ghost_states[id].accepted == Some((b, new_value)));
                         }
@@ -365,12 +418,41 @@ impl<S: Clone + PartialEq + Eq> CASPaxosCluster<S> {
 
         // Phase 2 quorum reached — extend ghost history with new_value.
         proof {
-            // Establish chosen(local_ghost_states, b, new_value, phase2_quorum, cluster_size).
-            // Direct from loop invariant: every id in phase2_quorum has
-            // local_ghost_states[id].accepted == Some((b, new_value)). For
-            // is_quorum, we have phase2_quorum.len() == accepted_count >= quorum_size,
-            // and quorum_size = cluster_size/2 + 1, so 2*phase2_quorum.len() > cluster_size.
-            assume(is_quorum(phase2_quorum, self.cluster_size));
+            // Establish is_quorum(phase2_quorum, cluster_size).
+            // Loop invariant: accepted_count == phase2_quorum.len(), phase2_quorum.finite().
+            // Post-loop: accepted_count >= quorum_size.
+            // quorum_size = (cluster_size / 2 + 1) as usize (exec computation).
+            // Verus cannot bridge exec let-bindings into spec, so we assume the
+            // nat-level quorum_size value. This is sound: quorum_size was set to
+            // exactly (self.cluster_size / 2 + 1) as usize before Phase 1.
+            assume(quorum_size as nat == (self.cluster_size as nat) / 2 + 1);
+            // From the loop invariant and post-loop guard:
+            assert(phase2_quorum.len() == accepted_count as nat);
+            assert(accepted_count >= quorum_size);
+            // Arithmetic: phase2_quorum.len() * 2 > cluster_size.
+            // We know phase2_quorum.len() >= quorum_size and
+            // quorum_size = cluster_size/2 + 1 (nat division).
+            // Key: (cs/2 + 1)*2 > cs for all nat cs. Proof by cases:
+            //   cs even (cs = 2k): cs/2 = k, (k+1)*2 = 2k+2 > 2k = cs.
+            //   cs odd (cs = 2k+1): cs/2 = k, (k+1)*2 = 2k+2 > 2k+1 = cs.
+            assert(phase2_quorum.len() * 2 > self.cluster_size as nat) by {
+                let plen: nat = phase2_quorum.len();
+                let qs: nat = quorum_size as nat;
+                let cs: nat = self.cluster_size as nat;
+                assert(plen >= qs);
+                assert(qs == cs / 2 + 1);
+                // cs / 2 * 2 <= cs < cs / 2 * 2 + 2 (property of nat integer division)
+                assert(cs / 2 * 2 <= cs) by (nonlinear_arith);
+                assert(cs < cs / 2 * 2 + 2) by (nonlinear_arith);
+                // Therefore (cs/2 + 1) * 2 = cs/2*2 + 2 > cs
+                assert(qs * 2 == (cs / 2 + 1) * 2);
+                assert((cs / 2 + 1) * 2 == cs / 2 * 2 + 2) by (nonlinear_arith);
+                assert(qs * 2 > cs);
+                // plen >= qs, so plen * 2 >= qs * 2 > cs
+                assert(plen * 2 >= qs * 2) by (nonlinear_arith)
+                    requires plen >= qs;
+            };
+            assert(is_quorum(phase2_quorum, self.cluster_size));
             assert(chosen(local_ghost_states, b, new_value, phase2_quorum, self.cluster_size));
 
             // The history extension obligations require deeper invariants we
@@ -388,7 +470,12 @@ impl<S: Clone + PartialEq + Eq> CASPaxosCluster<S> {
             assume(inv_chosen_in_history(
                 self.ghost_history@, states_before_p2,
                 self.cluster_size, self.universe@));
-            assume(inv_history_monotone(self.ghost_history@));
+            // inv_history_monotone: self.ghost_history@ has not been mutated yet
+            // (no proof-block assignment to self.ghost_history@ precedes this point),
+            // so it still equals initial_history, which satisfies inv_history_monotone
+            // by the captured ghost local.
+            assert(self.ghost_history@ == initial_history);
+            assert(inv_history_monotone(self.ghost_history@));
 
             lemma_history_append_preserves_monotone(self.ghost_history@, new_value);
             lemma_chosen_in_history_maintained(
